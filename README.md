@@ -6,6 +6,7 @@ A jogging music player with live workout stats, rebuilt in plain HTML/CSS/JS fro
 - Four stat pages: running speed (per 10 min), heart rate (per minute), duration, distance. Swipe or use the arrows.
 - Numbers update every second from a simulated run.
 - The purple button plays and pauses the music. Previous/next swap the album like a record.
+- Sound: each album plays an original demo loop synthesized in the browser with the Web Audio API (no audio files). Browsers only allow sound after a tap, so the music starts on your first touch.
 
 The whole app is one file: `index.html` (no build step).
 
