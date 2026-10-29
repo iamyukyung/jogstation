@@ -446,6 +446,100 @@ svg { display: block; }
   ];
   tracks.forEach(t => t.img = t.src || paintArt(t.pal, t.seed));
 
+
+  /* ---------- Demo music (original loops synthesized with Web Audio; no audio files) ---------- */
+  const Music = (() => {
+    const STYLES = [
+      { bpm: 124, root: 45, prog: [0, -4, 3, -2] },   // A minor feel
+      { bpm: 116, root: 41, prog: [0, 3, -2, -4] },   // F
+      { bpm: 132, root: 48, prog: [0, -3, -5, -1] },  // C
+    ];
+    let ctx = null, out = null, noise = null, timer = null, step = 0, nextT = 0, style = STYLES[0];
+    const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+    function ensure() {
+      if (ctx) return true;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      ctx = new AC();
+      const comp = ctx.createDynamicsCompressor();
+      out = ctx.createGain(); out.gain.value = 0.55;
+      out.connect(comp); comp.connect(ctx.destination);
+      noise = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
+      const d = noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      return true;
+    }
+    function env(g, t, peak, a, dur) {
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + a);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    }
+    function kick(t) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.14);
+      env(g, t, 0.9, 0.004, 0.32); o.connect(g).connect(out); o.start(t); o.stop(t + 0.35);
+    }
+    function hat(t, open) {
+      const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      src.buffer = noise; f.type = 'highpass'; f.frequency.value = 7500;
+      env(g, t, open ? 0.12 : 0.07, 0.002, open ? 0.18 : 0.05); src.connect(f).connect(g).connect(out);
+      src.start(t); src.stop(t + 0.25);
+    }
+    function clap(t) {
+      const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      src.buffer = noise; f.type = 'bandpass'; f.frequency.value = 1500; f.Q.value = 0.8;
+      env(g, t, 0.28, 0.003, 0.16); src.connect(f).connect(g).connect(out); src.start(t); src.stop(t + 0.2);
+    }
+    function bass(t, m, dur) {
+      const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      o.type = 'sawtooth'; o.frequency.value = hz(m); f.type = 'lowpass'; f.frequency.value = 420;
+      env(g, t, 0.22, 0.01, dur); o.connect(f).connect(g).connect(out); o.start(t); o.stop(t + dur + 0.05);
+    }
+    function pad(t, root, dur) {
+      [0, 3, 7, 10].forEach(iv => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'triangle'; o.frequency.value = hz(root + 24 + iv);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(0.035, t + 0.4);
+        g.gain.linearRampToValueAtTime(0.0001, t + dur);
+        o.connect(g).connect(out); o.start(t); o.stop(t + dur + 0.05);
+      });
+    }
+    function play16(i, t) {
+      const s16 = 60 / style.bpm / 4, bar = Math.floor(i / 16), k = i % 16;
+      const root = style.root + style.prog[bar % style.prog.length];
+      if (k % 4 === 0) kick(t);
+      if (k === 4 || k === 12) clap(t);
+      if (k % 4 === 2) hat(t, k === 14);
+      else if (k % 2 === 1) hat(t, false);
+      if ([0, 3, 6, 8, 11, 14].includes(k)) bass(t, root + (k === 11 ? 12 : 0), s16 * 1.6);
+      if (k === 0) pad(t, root, s16 * 16);
+    }
+    function schedule() {
+      const s16 = 60 / style.bpm / 4;
+      while (nextT < ctx.currentTime + 0.12) { play16(step, nextT); nextT += s16; step++; }
+    }
+    return {
+      started: false,
+      play(i) {
+        if (!ensure()) return;
+        this.started = true;
+        ctx.resume();
+        style = STYLES[i % STYLES.length]; step = 0; nextT = ctx.currentTime + 0.06;
+        out.gain.cancelScheduledValues(ctx.currentTime); out.gain.setValueAtTime(0.55, ctx.currentTime);
+        if (!timer) timer = setInterval(schedule, 25);
+      },
+      stop() {
+        if (timer) { clearInterval(timer); timer = null; }
+        if (ctx) { out.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.05); }
+      },
+    };
+  })();
+  // Browsers only allow sound after a user gesture: start the loop on the first touch anywhere.
+  document.addEventListener('pointerdown', e => {
+    if (Music.started || !S.playing || e.target.closest('#runBtn')) return;
+    Music.play(S.track);
+  }, { capture: true, once: false });
+
   /* ---------- State ---------- */
   const S = {
     open: false, page: 0, playing: true, track: 0, pos: 61, liked: false, running: true,
@@ -488,12 +582,14 @@ svg { display: block; }
     $('trackTime').textContent = `${fmt(S.pos)} / ${fmt(t.len)}`;
     $('trackArc').style.strokeDashoffset = 716.3 * (1 - S.pos / t.len);
   }
-  function setTrack(i, dir = 0) { S.track = (i + tracks.length) % tracks.length; S.pos = 0; renderTrack(dir); }
+  function setTrack(i, dir = 0) { S.track = (i + tracks.length) % tracks.length; S.pos = 0; renderTrack(dir); if (S.playing && Music.started) Music.play(S.track); }
   $('prevTrack').onclick = () => setTrack(S.track - 1, -1);
   $('nextTrack').onclick = () => setTrack(S.track + 1, 1);
   // The purple button at the bottom is the music play/pause control; the workout keeps recording.
   $('runBtn').onclick = e => {
+    if (!Music.started && S.playing) { Music.play(S.track); return; } // first tap starts the sound
     S.playing = !S.playing;
+    if (S.playing) Music.play(S.track); else Music.stop();
     $('disc').classList.toggle('paused', !S.playing);
     e.currentTarget.classList.toggle('paused', !S.playing);
     e.currentTarget.setAttribute('aria-label', S.playing ? 'Pause music' : 'Play music');
